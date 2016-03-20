@@ -36,6 +36,8 @@ from ryu.exception import RyuException
 from ryu.lib import dpid as dpid_lib
 from ryu.lib import hub
 from ryu.lib import stringify
+
+
 from ryu.lib.packet import packet
 from ryu.ofproto import ofproto_parser
 from ryu.ofproto import ofproto_protocol
@@ -500,33 +502,21 @@ vlans:
             self._test(STATE_INIT_THROUGHPUT_FLOW, self.tester_sw)
 
             # Install flows.
-            for flow in test.prerequisite:
-                if isinstance(
-                        flow, self.target_sw.dp.ofproto_parser.OFPFlowMod):
-                    #print('print instead of inserting flow %s')
+            if isinstance(test.prerequisite[0], self.target_sw.dp.ofproto_parser.OFPFlowMod) :
                     #TODO: Checking whether the flow is installed correctly
-                    print('installing flow')
-                    self._test(STATE_FLOW_INSTALL, self.target_sw, test.tests[0])
-                    print('flow installed')
-                    #self._test(STATE_FLOW_INSTALL, self.target_sw, flow)
-                    #self._test(STATE_FLOW_EXIST_CHK,
-                    #           self.target_sw.send_flow_stats, flow)
-                elif isinstance(
-                        flow, self.target_sw.dp.ofproto_parser.OFPMeterMod):
-                    print(flow)
-                    self._test(STATE_METER_INSTALL, self.target_sw, flow)
-                    #self._test(STATE_METER_EXIST_CHK,
-                    #           self.target_sw.send_meter_config_stats, flow)
-                elif isinstance(
-                        flow, self.target_sw.dp.ofproto_parser.OFPGroupMod):
-                    self._test(STATE_GROUP_INSTALL, self.target_sw, flow)
-                    self._test(STATE_GROUP_EXIST_CHK,
-                               self.target_sw.send_group_desc_stats, flow)
-            '''
-            print('installing flow')
-            self._test(STATE_FLOW_INSTALL, self.target_sw, test.tests[0])
-            print('flow installed')
-            '''
+                print('installing flow')
+                self._test(STATE_FLOW_INSTALL, self.target_sw,test.prerequisite[0], test.tests[0])
+                print('flow installed')
+
+            elif isinstance(test.prerequisite[0], self.target_sw.dp.ofproto_parser.OFPMeterMod):
+                self._test(STATE_METER_INSTALL, self.target_sw, test.prerequisite, test.tests[0])
+                #self._test(STATE_METER_EXIST_CHK,
+                #           self.target_sw.send_meter_config_stats, flow)
+            #elif isinstance(
+                    #flow, self.target_sw.dp.ofproto_parser.OFPGroupMod):
+                #self._test(STATE_GROUP_INSTALL, self.target_sw, flow)
+                #self._test(STATE_GROUP_EXIST_CHK,
+                           #self.target_sw.send_group_desc_stats, flow)
             # Do tests.
             for pkt in test.tests:
 
@@ -541,9 +531,9 @@ vlans:
                     for throughput in pkt[KEY_THROUGHPUT]:
                         flow = throughput[KEY_FLOW]
                         self._test(STATE_THROUGHPUT_FLOW_INSTALL,
-                                   self.tester_sw, flow)
-                        self._test(STATE_THROUGHPUT_FLOW_EXIST_CHK,
-                                   self.tester_sw.send_flow_stats, flow)
+                                   self.tester_sw, None,flow)
+                        #self._test(STATE_THROUGHPUT_FLOW_EXIST_CHK,
+                        #           self.tester_sw.send_flow_stats, flow)
                     start = self._test(STATE_GET_THROUGHPUT)
                 elif KEY_TBL_MISS in pkt:
                     before_stats = self._test(STATE_GET_MATCH_COUNT)
@@ -572,10 +562,10 @@ vlans:
                     end = self._test(STATE_GET_THROUGHPUT)
                     self._test(STATE_THROUGHPUT_CHK, pkt[KEY_THROUGHPUT],
                                start, end)
-                elif KEY_TBL_MISS in pkt:
-                    self._test(STATE_SEND_BARRIER)
-                    hub.sleep(INTERVAL)
-                    self._test(STATE_FLOW_UNMATCH_CHK, before_stats, pkt)
+                #elif KEY_TBL_MISS in pkt:
+                    #self._test(STATE_SEND_BARRIER)
+                    #hub.sleep(INTERVAL)
+                    #self._test(STATE_FLOW_UNMATCH_CHK, before_stats, pkt)
 
             result = [TEST_OK]
             result_type = TEST_OK
@@ -631,7 +621,7 @@ vlans:
                 STATE_INIT_GROUP: self.target_sw.del_groups,
                 STATE_FLOW_INSTALL: self._test_msg_install,
                 STATE_THROUGHPUT_FLOW_INSTALL: self._test_msg_install,
-                STATE_METER_INSTALL: self._test_msg_install,
+                STATE_METER_INSTALL: self._test_meter_msg_install,
                 STATE_GROUP_INSTALL: self._test_msg_install,
                 STATE_FLOW_EXIST_CHK: self._test_exist_check,
                 STATE_THROUGHPUT_FLOW_EXIST_CHK: self._test_exist_check,
@@ -686,17 +676,26 @@ vlans:
 
 
     #def _test_msg_install(self, datapath, message):
-    def _test_msg_install(self, datapath, pkt):
+    def _test_msg_install(self, datapath,message, pkt):
         from ryu.lib.packet import ethernet
         from ryu.lib.packet import vlan
         from ryu.ofproto import ether
-
         if datapath.dp is self.target_sw.dp:
-            new_pkt = packet.Packet(pkt[KEY_INGRESS])
+            print('---------------------')
+            #print(pkt)
+            if KEY_THROUGHPUT in pkt:
+                new_pkt = packet.Packet(pkt[KEY_PACKETS]['packet_binary'])
+            else:
+                new_pkt = packet.Packet(pkt[KEY_INGRESS])
             dp = self.target_sw.dp
             eth_pkt = new_pkt.get_protocols(ethernet.ethernet)[0]
             eth_type = eth_pkt.ethertype
-            in_port = self.target_send_port_1
+
+            print(message)
+            if message.match['in_port']:
+                in_port = message.match['in_port']
+            else :
+                in_port = self.target_send_port_1
             if eth_type == ether.ETH_TYPE_8021Q:
                 # tagged packet
                 vlan_proto = new_pkt.get_protocols(vlan.vlan)[0]
@@ -711,12 +710,16 @@ vlans:
                 v = vlan.vlan(vid=vlan_vid,ethertype=eth_type)
                 new_pkt.add_protocol(v)
 
-            if KEY_EGRESS in pkt:
+            if KEY_EGRESS in pkt or KEY_THROUGHPUT in pkt:
                 flowmods = self.valve.rcv_packet(dp.id, in_port, vlan_vid, None, new_pkt)
                 self.send_flow_msgs(dp,flowmods)
+                print('inport %s' % in_port)
+                #print(flowmods)
                 new_rvpkt = self.reverseTestPacket(new_pkt)
                 flowmods = self.valve.rcv_packet(dp.id, self.tester_recv_port_1, vlan_vid, None, new_rvpkt)
                 self.send_flow_msgs(dp,flowmods)
+                print('inport %s' % self.tester_recv_port_1)
+                #print(flowmods)
 
             elif KEY_PKT_IN in pkt:
                 from ryu.ofproto import ofproto_v1_3_parser
@@ -728,11 +731,10 @@ vlans:
                 self.send_flow_msgs(dp,flowmods)
                 
         else:
-            pass
-            '''
-            xid = datapath.send_msg(message)
+            
+            xid = datapath.send_msg(pkt)
             self.send_msg_xids.append(xid)
-
+            #print(pkt)
             xid = datapath.send_barrier_request()
             self.send_msg_xids.append(xid)
 
@@ -740,8 +742,12 @@ vlans:
             assert len(self.rcv_msgs) == 1
             msg = self.rcv_msgs[0]
             assert isinstance(msg, datapath.dp.ofproto_parser.OFPBarrierReply)
-            '''
+            
 
+    def  _test_meter_msg_install(self, datapath, message, pkt):
+        print('----------meter')
+        self.send_flow_msgs( self.target_sw.dp, message[0:1])
+        self._test_msg_install(datapath, message[1],pkt)
 
     def _test_exist_check(self, method, message):
         ofp = method.__self__.dp.ofproto
@@ -1251,7 +1257,7 @@ vlans:
         else:
             reason = 'unknown'
 
-        print('---------- packet in from %s for %s' %(dpid_lib.dpid_to_str(ev.msg.datapath.id),reason))
+        #print('---------- packet in from %s for %s' %(dpid_lib.dpid_to_str(ev.msg.datapath.id),reason))
 
         state_list = [STATE_FLOW_MATCH_CHK]
         if self.state in state_list:
