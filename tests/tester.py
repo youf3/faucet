@@ -52,7 +52,6 @@ from faucet.valve import valve_factory
 from faucet.dp import DP
 import tempfile, os
 
-
 # import all packet libraries.
 PKT_LIB_PATH = 'ryu.lib.packet'
 for modname, moddef in sys.modules.items():
@@ -270,7 +269,6 @@ class TestReceiveError(TestMessageBase):
 class TestError(TestMessageBase):
     def __init__(self, state, **argv):
         super(TestError, self).__init__(state, ERROR, **argv)
-
 
 class OfTester(app_manager.RyuApp):
     """ OpenFlow Switch Tester. """
@@ -502,21 +500,12 @@ vlans:
             self._test(STATE_INIT_THROUGHPUT_FLOW, self.tester_sw)
 
             # Install flows.
-            if isinstance(test.prerequisite[0], self.target_sw.dp.ofproto_parser.OFPFlowMod) :
-                    #TODO: Checking whether the flow is installed correctly
-                print('installing flow')
-                self._test(STATE_FLOW_INSTALL, self.target_sw,test.prerequisite[0], test.tests[0])
-                print('flow installed')
-
-            elif isinstance(test.prerequisite[0], self.target_sw.dp.ofproto_parser.OFPMeterMod):
+            if 'throughput' in test.tests[0]:
                 self._test(STATE_METER_INSTALL, self.target_sw, test.prerequisite, test.tests[0])
-                #self._test(STATE_METER_EXIST_CHK,
-                #           self.target_sw.send_meter_config_stats, flow)
-            #elif isinstance(
-                    #flow, self.target_sw.dp.ofproto_parser.OFPGroupMod):
-                #self._test(STATE_GROUP_INSTALL, self.target_sw, flow)
-                #self._test(STATE_GROUP_EXIST_CHK,
-                           #self.target_sw.send_group_desc_stats, flow)
+            else:
+                    #TODO: Checking whether the flow is installed correctly
+                self._test(STATE_FLOW_INSTALL, self.target_sw,test.prerequisite[0], test.tests[0])
+ 
             # Do tests.
             for pkt in test.tests:
 
@@ -648,7 +637,6 @@ vlans:
         # can not be filtered by the cookie value, this tool deletes all
         # flow entries of the tester switch temporarily and inserts default
         # flow entry immediately.
-        print('deleting flows for %s' % dpid_lib.dpid_to_str(datapath.dp.id))
 
         xid = datapath.del_flows()
         self.send_msg_xids.append(xid)
@@ -680,9 +668,8 @@ vlans:
         from ryu.lib.packet import ethernet
         from ryu.lib.packet import vlan
         from ryu.ofproto import ether
+
         if datapath.dp is self.target_sw.dp:
-            print('---------------------')
-            #print(pkt)
             if KEY_THROUGHPUT in pkt:
                 new_pkt = packet.Packet(pkt[KEY_PACKETS]['packet_binary'])
             else:
@@ -691,11 +678,14 @@ vlans:
             eth_pkt = new_pkt.get_protocols(ethernet.ethernet)[0]
             eth_type = eth_pkt.ethertype
 
-            print(message)
             if message.match['in_port']:
                 in_port = message.match['in_port']
             else :
                 in_port = self.target_send_port_1
+
+            #if isinstance(message.instructions[0],self.target_sw.dp.ofproto_parser.OFPInstructionMeter):
+                #meterInst = message.instructions[0]
+
             if eth_type == ether.ETH_TYPE_8021Q:
                 # tagged packet
                 vlan_proto = new_pkt.get_protocols(vlan.vlan)[0]
@@ -713,18 +703,15 @@ vlans:
             if KEY_EGRESS in pkt or KEY_THROUGHPUT in pkt:
                 flowmods = self.valve.rcv_packet(dp.id, in_port, vlan_vid, None, new_pkt)
                 self.send_flow_msgs(dp,flowmods)
-                print('inport %s' % in_port)
-                #print(flowmods)
                 new_rvpkt = self.reverseTestPacket(new_pkt)
                 flowmods = self.valve.rcv_packet(dp.id, self.tester_recv_port_1, vlan_vid, None, new_rvpkt)
+                #if KEY_THROUGHPUT in pkt:
+                #    flowmods = self.addMeterInst(flowmods, meterInst, self.tester_recv_port_1)
                 self.send_flow_msgs(dp,flowmods)
                 print('inport %s' % self.tester_recv_port_1)
-                #print(flowmods)
 
             elif KEY_PKT_IN in pkt:
-                from ryu.ofproto import ofproto_v1_3_parser
-                from ryu.ofproto import ofproto_v1_3 as ofp
-                actions =  [ofproto_v1_3_parser.OFPActionPopVlan(),ofproto_v1_3_parser.OFPActionOutput(ofp.OFPP_CONTROLLER, max_len=256)]
+                actions =  [dp.parser.OFPActionOutput(ofp.OFPP_CONTROLLER, max_len=256)]
                 match = self.valve.valve_in_match(vlan = v)
                 inst = [self.valve.apply_actions(actions)]
                 flowmods = [self.valve.valve_flowmod(self.valve.dp.eth_src_table,match = match,priority=self.valve.dp.highest_priority,inst=inst)]
@@ -734,7 +721,6 @@ vlans:
             
             xid = datapath.send_msg(pkt)
             self.send_msg_xids.append(xid)
-            #print(pkt)
             xid = datapath.send_barrier_request()
             self.send_msg_xids.append(xid)
 
@@ -743,11 +729,22 @@ vlans:
             msg = self.rcv_msgs[0]
             assert isinstance(msg, datapath.dp.ofproto_parser.OFPBarrierReply)
             
+    def addMeterInst(self, flowmods, meterInst, out_port):
+
+        for flowmod in flowmods:
+            if isinstance(flowmod, self.target_sw.dp.ofproto_parser.OFPFlowMod):
+                for inst in flowmod.instructions:
+                    if isinstance(inst, self.target_sw.dp.ofproto_parser.OFPInstructionActions):
+                        for action in inst.actions:
+                            if isinstance(action, self.target_sw.dp.ofproto_parser.OFPActionOutput):
+                                if action.port == out_port:
+                                    flowmod.instructions.append(meterInst)
+                                    return flowmods
+        return flowmods
 
     def  _test_meter_msg_install(self, datapath, message, pkt):
-        print('----------meter')
-        self.send_flow_msgs( self.target_sw.dp, message[0:1])
-        self._test_msg_install(datapath, message[1],pkt)
+        #self.send_flow_msgs( self.target_sw.dp, message[0:1])
+        self._test_msg_install(datapath, message[0],pkt)
 
     def _test_exist_check(self, method, message):
         ofp = method.__self__.dp.ofproto
