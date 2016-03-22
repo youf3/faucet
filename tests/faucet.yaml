@@ -1,0 +1,21 @@
+
+---
+dp_id: 0x0000eccd6dab47ff
+name: "untagged-faucet-1"
+hardware: "Allied-Telesis"
+interfaces:
+    1:
+        native_vlan: 100
+        description: "b1"
+    2:
+        native_vlan: 100
+        description: "b2"
+    3:
+        native_vlan: 100
+        description: "b3"
+    4:
+        native_vlan: 100
+        description: "b4"
+vlans:
+    100:
+        description: "tagged"
