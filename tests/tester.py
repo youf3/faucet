@@ -52,6 +52,10 @@ from faucet.valve import valve_factory
 from faucet.dp import DP
 import tempfile, os
 
+from ostinato.core import ost_pb, DroneProxy
+from ostinato.protocols.mac_pb2 import mac
+from ostinato.protocols.ip4_pb2 import ip4, Ip4
+
 # import all packet libraries.
 PKT_LIB_PATH = 'ryu.lib.packet'
 for modname, moddef in sys.modules.items():
@@ -275,30 +279,6 @@ class OfTester(app_manager.RyuApp):
     tester_ver = None
     target_ver = None
 
-    CONFIG = """
----
-dp_id: 0x0000eccd6dab47ff
-name: "untagged-faucet-1"
-hardware: "Allied-Telesis"
-interfaces:
-    1:
-        native_vlan: 100
-        description: "b1"
-    2:
-        native_vlan: 100
-        description: "b2"
-    3:
-        native_vlan: 100
-        description: "b3"
-    4:
-        native_vlan: 100
-        description: "b4"
-vlans:
-    100:
-        description: "untagged"
-"""
-
-
     def __init__(self):
         super(OfTester, self).__init__()
         self._set_logger()
@@ -320,14 +300,13 @@ vlans:
 
 
         self.tmpdir = tempfile.mkdtemp()
-        os.environ['FAUCET_CONFIG'] = os.path.join(self.tmpdir,
+        os.environ['FAUCET_CONFIG'] = os.path.join('./',
              'faucet.yaml')
         os.environ['FAUCET_LOG'] = os.path.join(self.tmpdir,
              'faucet.log')
         os.environ['FAUCET_EXCEPTION_LOG'] = os.path.join(self.tmpdir,
             'faucet-exception.log')
-        open(os.environ['FAUCET_CONFIG'], 'w').write(self.CONFIG)
-        dp = DP.parser(os.path.join(self.tmpdir,'faucet.yaml'), os.path.join(self.tmpdir,'faucet.log'))
+        dp = DP.parser(os.environ['FAUCET_CONFIG'], os.environ['FAUCET_LOG'])
         dp.sanity_check()
         self.valve = valve_factory(dp)
 
@@ -708,10 +687,9 @@ vlans:
                 #if KEY_THROUGHPUT in pkt:
                 #    flowmods = self.addMeterInst(flowmods, meterInst, self.tester_recv_port_1)
                 self.send_flow_msgs(dp,flowmods)
-                print('inport %s' % self.tester_recv_port_1)
 
             elif KEY_PKT_IN in pkt:
-                actions =  [dp.parser.OFPActionOutput(ofp.OFPP_CONTROLLER, max_len=256)]
+                actions =  [dp.parser.OFPActionOutput(dp.ofproto.OFPP_CONTROLLER, max_len=256)]
                 match = self.valve.valve_in_match(vlan = v)
                 inst = [self.valve.apply_actions(actions)]
                 flowmods = [self.valve.valve_flowmod(self.valve.dp.eth_src_table,match = match,priority=self.valve.dp.highest_priority,inst=inst)]
