@@ -505,7 +505,7 @@ class OfTester(app_manager.RyuApp):
                     start = self._test(STATE_GET_THROUGHPUT)
                 elif KEY_TBL_MISS in pkt:
                     before_stats = self._test(STATE_GET_MATCH_COUNT)
- 
+                print(pkt)
                 # Send packet(s)
                 if KEY_INGRESS in pkt:
                     self._one_time_packet_send(pkt)
@@ -604,7 +604,7 @@ class OfTester(app_manager.RyuApp):
                 STATE_FLOW_UNMATCH_CHK: self._test_flow_unmatching_check,
                 STATE_GET_THROUGHPUT: self._test_get_throughput,
                 STATE_THROUGHPUT_CHK: self._test_throughput_check}
-
+        
         self.send_msg_xids = []
         self.rcv_msgs = []
 
@@ -1232,8 +1232,6 @@ class OfTester(app_manager.RyuApp):
         else:
             reason = 'unknown'
 
-        #print('---------- packet in from %s for %s' %(dpid_lib.dpid_to_str(ev.msg.datapath.id),reason))
-
         state_list = [STATE_FLOW_MATCH_CHK]
         if self.state in state_list:
             if self.waiter:
@@ -1281,7 +1279,6 @@ class OpenFlowSw(object):
         if isinstance(self.dp, DummyDatapath):
             raise TestError(STATE_DISCONNECTED)
         msg.xid = None
-        #print(type(self.dp))
         self.dp.set_xid(msg)
         self.dp.send_msg(msg)
         return msg.xid
