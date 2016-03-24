@@ -47,14 +47,13 @@ from ryu.ofproto import ofproto_v1_3
 from ryu.ofproto import ofproto_v1_4
 from ryu.ofproto import ofproto_v1_5
 
+from ryu.controller import dpset
 sys.path.insert(0, '../src/ryu_faucet/org/onfsdn/')
 from faucet.valve import valve_factory
 from faucet.dp import DP
 import tempfile, os
-
-from ostinato.core import ost_pb, DroneProxy
-from ostinato.protocols.mac_pb2 import mac
-from ostinato.protocols.ip4_pb2 import ip4, Ip4
+from faucet.faucet import EventFaucetReconfigure
+from faucet.faucet import Faucet
 
 # import all packet libraries.
 PKT_LIB_PATH = 'ryu.lib.packet'
@@ -278,8 +277,8 @@ class OfTester(app_manager.RyuApp):
     """ OpenFlow Switch Tester. """
     tester_ver = None
     target_ver = None
-
-    def __init__(self):
+    _CONTEXTS = {'dpset': dpset.DPSet}
+    def __init__(self, *args, **kwargs):
         super(OfTester, self).__init__()
         self._set_logger()
 
@@ -298,7 +297,6 @@ class OfTester(app_manager.RyuApp):
                          dpid_lib.dpid_to_str(self.tester_dpid))
 
 
-
         self.tmpdir = tempfile.mkdtemp()
         os.environ['FAUCET_CONFIG'] = os.path.join('./',
              'faucet.yaml')
@@ -306,9 +304,10 @@ class OfTester(app_manager.RyuApp):
              'faucet.log')
         os.environ['FAUCET_EXCEPTION_LOG'] = os.path.join(self.tmpdir,
             'faucet-exception.log')
-        dp = DP.parser(os.environ['FAUCET_CONFIG'], os.environ['FAUCET_LOG'])
-        dp.sanity_check()
-        self.valve = valve_factory(dp)
+
+        print(kwargs)
+        fc = Faucet(*args, **kwargs)
+        self.faucet = fc
 
         def __get_version(opt):
             vers = {
@@ -503,9 +502,9 @@ class OfTester(app_manager.RyuApp):
                         #self._test(STATE_THROUGHPUT_FLOW_EXIST_CHK,
                         #           self.tester_sw.send_flow_stats, flow)
                     start = self._test(STATE_GET_THROUGHPUT)
-                elif KEY_TBL_MISS in pkt:
-                    before_stats = self._test(STATE_GET_MATCH_COUNT)
-                print(pkt)
+                #elif KEY_TBL_MISS in pkt:
+                    #before_stats = self._test(STATE_GET_MATCH_COUNT)
+
                 # Send packet(s)
                 if KEY_INGRESS in pkt:
                     self._one_time_packet_send(pkt)
@@ -638,8 +637,8 @@ class OfTester(app_manager.RyuApp):
             dp = self.target_sw.dp
             discovered_ports = [
                 p.port_no for p in dp.ports.values() if p.state == 0]
-            flowmods = self.valve.datapath_connect(dp.id, discovered_ports)
-            self.send_flow_msgs(dp, flowmods)
+            flowmods = self.faucet.valve.datapath_connect(dp.id, discovered_ports)
+            self.faucet.send_flow_msgs(dp, flowmods)
 
 
     #def _test_msg_install(self, datapath, message):
@@ -656,11 +655,16 @@ class OfTester(app_manager.RyuApp):
             dp = self.target_sw.dp
             eth_pkt = new_pkt.get_protocols(ethernet.ethernet)[0]
             eth_type = eth_pkt.ethertype
-
+            #print(message.instructions)
             if message.match['in_port']:
                 in_port = message.match['in_port']
             else :
                 in_port = self.target_send_port_1
+
+            for inst in message.instructions:
+                for action in inst.actions:
+                    if isinstance(action, self.target_sw.dp.ofproto_parser.OFPActionOutput):
+                        out_port = action.port
 
             #if isinstance(message.instructions[0],self.target_sw.dp.ofproto_parser.OFPInstructionMeter):
                 #meterInst = message.instructions[0]
@@ -672,7 +676,7 @@ class OfTester(app_manager.RyuApp):
             else:
                 self.logger.debug('adding vlan to test packet')
                 eth_type = ether.ETH_TYPE_8021Q
-                for vid,vlanObj in self.valve.dp.vlans.iteritems():
+                for vid,vlanObj in self.faucet.valve.dp.vlans.iteritems():
                     for port in vlanObj.get_ports():
                         if port.number == in_port: vlan_vid = vid
                 if not vlan_vid: raise RyuException('VLAN port not found.')
@@ -680,20 +684,24 @@ class OfTester(app_manager.RyuApp):
                 new_pkt.add_protocol(v)
 
             if KEY_EGRESS in pkt or KEY_THROUGHPUT in pkt:
-                flowmods = self.valve.rcv_packet(dp.id, in_port, vlan_vid, None, new_pkt)
-                self.send_flow_msgs(dp,flowmods)
+                flowmods = self.faucet.valve.rcv_packet(dp.id, in_port, vlan_vid, None, new_pkt)
+                self.faucet.send_flow_msgs(dp,flowmods)
                 new_rvpkt = self.reverseTestPacket(new_pkt)
-                flowmods = self.valve.rcv_packet(dp.id, self.tester_recv_port_1, vlan_vid, None, new_rvpkt)
+                if out_port:
+                    flowmods = self.faucet.valve.rcv_packet(dp.id, out_port, vlan_vid, None, new_rvpkt)    
+                else:
+                    flowmods = self.faucet.valve.rcv_packet(dp.id, self.tester_recv_port_1, vlan_vid, None, new_rvpkt)
                 #if KEY_THROUGHPUT in pkt:
                 #    flowmods = self.addMeterInst(flowmods, meterInst, self.tester_recv_port_1)
-                self.send_flow_msgs(dp,flowmods)
+                self.faucet.send_flow_msgs(dp,flowmods)
 
             elif KEY_PKT_IN in pkt:
-                actions =  [dp.parser.OFPActionOutput(dp.ofproto.OFPP_CONTROLLER, max_len=256)]
-                match = self.valve.valve_in_match(vlan = v)
-                inst = [self.valve.apply_actions(actions)]
-                flowmods = [self.valve.valve_flowmod(self.valve.dp.eth_src_table,match = match,priority=self.valve.dp.highest_priority,inst=inst)]
-                self.send_flow_msgs(dp,flowmods)
+                actions =  [self.tester_sw.dp.ofproto_parser.OFPActionOutput(self.tester_sw.dp.ofproto.OFPP_CONTROLLER, max_len=256)]
+                match = self.faucet.valve.valve_in_match(vlan = v)
+                inst = [self.faucet.valve.apply_actions(actions)]
+                flowmods = [self.faucet.valve.valve_flowmod(self.faucet.
+                                                            valve.dp.eth_src_table,match = match,priority=self.valve.dp.highest_priority,inst=inst)]
+                self.faucet.send_flow_msgs(dp,flowmods)
                 
         else:
             
@@ -1250,11 +1258,6 @@ class OfTester(app_manager.RyuApp):
         pkt = packet.Packet()
         pkt.add_protocol(eth_pkt)
         return pkt
-
-    def send_flow_msgs(self, dp, flow_msgs):
-        for flow_msg in flow_msgs:
-            flow_msg.datapath = dp
-            dp.send_msg(flow_msg)
 
     @set_ev_cls(ofp_event.EventOFPErrorMsg, [handler.HANDSHAKE_DISPATCHER,
                                              handler.CONFIG_DISPATCHER,
