@@ -305,7 +305,6 @@ class OfTester(app_manager.RyuApp):
         os.environ['FAUCET_EXCEPTION_LOG'] = os.path.join(self.tmpdir,
             'faucet-exception.log')
 
-        print(kwargs)
         fc = Faucet(*args, **kwargs)
         self.faucet = fc
 
@@ -468,6 +467,14 @@ class OfTester(app_manager.RyuApp):
         if description:
             self.logger.info('%s', description)
         self.thread_msg = None
+
+        def signal_handler(sigid, frame):
+            if sigid == signal.SIGHUP:
+                print('reloading')
+                self.faucet.reload_config(None)
+                self._test(STATE_FLOW_INSTALL, self.target_sw, test.prerequisite[0], test.tests[0])
+
+        signal.signal(signal.SIGHUP, signal_handler)
 
         # Test execute.
         try:
@@ -927,6 +934,7 @@ class OfTester(app_manager.RyuApp):
     def _continuous_packet_send(self, pkt):
         assert self.ingress_event is None
 
+        self.packets_sent = 0
         pkt_text = pkt[KEY_PACKETS]['packet_text']
         pkt_bin = pkt[KEY_PACKETS]['packet_binary']
         pktps = pkt[KEY_PACKETS][KEY_PKTPS]
@@ -951,6 +959,10 @@ class OfTester(app_manager.RyuApp):
             tid = hub.spawn(self._send_packet_thread, arg)
             self.ingress_threads.append(tid)
             self.ingress_event.wait(duration_time)
+            for tid2 in self.ingress_threads:
+                hub.kill(tid2)
+            hub.joinall(self.ingress_threads)
+            self.ingress_threads = []
             if self.thread_msg is not None:
                 raise self.thread_msg  # pylint: disable=E0702
         finally:
@@ -980,6 +992,7 @@ class OfTester(app_manager.RyuApp):
         tid = hub.spawn(self._send_packet_thread, arg)
         self.ingress_threads.append(tid)
         hub.sleep(0)
+        #self.packets_sent += count
         for _ in range(count):
             if arg['randomize']:
                 msg = eval('/'.join(arg['packet_text']))
@@ -988,6 +1001,7 @@ class OfTester(app_manager.RyuApp):
             else:
                 data = arg['packet_binary']
             try:
+                pass
                 self.tester_sw.send_packet_out(data)
             except Exception as err:
                 self.thread_msg = err
@@ -1087,6 +1101,8 @@ class OfTester(app_manager.RyuApp):
                     ' it is malformed.')
 
     def _test_get_throughput(self):
+        #additional time required even after join the eventlet threads
+        time.sleep(1)
         xid = self.tester_sw.send_flow_stats()
         self.send_msg_xids.append(xid)
         self._wait()
@@ -1094,6 +1110,7 @@ class OfTester(app_manager.RyuApp):
         assert len(self.rcv_msgs) == 1
         flow_stats = self.rcv_msgs[0].body
         self.logger.debug(flow_stats)
+
         result = {}
         for stat in flow_stats:
             if stat.cookie != THROUGHPUT_COOKIE:
@@ -1114,7 +1131,7 @@ class OfTester(app_manager.RyuApp):
                 raise TestError(self.state, match=match)
             increased_bytes = end[1][match][0] - start[1][match][0]
             increased_packets = end[1][match][1] - start[1][match][1]
-
+            print('duration = %s,sent = %s, rcv packets = %s, bytes = %s, mbps = %.2f mbps' %(elapsed_sec,self.packets_sent,increased_packets, increased_bytes, increased_bytes *8 / 1024 / 1024 / elapsed_sec))
             if throughput[KEY_PKTPS]:
                 key = KEY_PKTPS
                 conv = 1
@@ -1160,7 +1177,6 @@ class OfTester(app_manager.RyuApp):
             timeout = True
         finally:
             timer.cancel()
-
         self.waiter = None
 
         if timeout:
