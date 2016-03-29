@@ -468,14 +468,6 @@ class OfTester(app_manager.RyuApp):
             self.logger.info('%s', description)
         self.thread_msg = None
 
-        def signal_handler(sigid, frame):
-            if sigid == signal.SIGHUP:
-                print('reloading')
-                self.faucet.reload_config(None)
-                self._test(STATE_FLOW_INSTALL, self.target_sw, test.prerequisite[0], test.tests[0])
-
-        signal.signal(signal.SIGHUP, signal_handler)
-
         # Test execute.
         try:
             # Initialize.
@@ -516,7 +508,7 @@ class OfTester(app_manager.RyuApp):
                 if KEY_INGRESS in pkt:
                     self._one_time_packet_send(pkt)
                 elif KEY_PACKETS in pkt:
-                    self._continuous_packet_send(pkt)
+                    self._continuous_packet_send(pkt, test)
 
                 hub.sleep()
 
@@ -648,6 +640,17 @@ class OfTester(app_manager.RyuApp):
             self.faucet.send_flow_msgs(dp, flowmods)
 
 
+    def reverseTestPacket(self, pkt):
+        import ryu.lib.packet
+        eth_pkt = pkt.get_protocols(packet.ethernet.ethernet)[0]
+        src = eth_pkt.src
+        eth_pkt.src = eth_pkt.dst
+        eth_pkt.dst = src
+    
+        pkt = packet.Packet()
+        pkt.add_protocol(eth_pkt)
+        return pkt
+
     #def _test_msg_install(self, datapath, message):
     def _test_msg_install(self, datapath,message, pkt):
         from ryu.lib.packet import ethernet
@@ -662,7 +665,7 @@ class OfTester(app_manager.RyuApp):
             dp = self.target_sw.dp
             eth_pkt = new_pkt.get_protocols(ethernet.ethernet)[0]
             eth_type = eth_pkt.ethertype
-            #print(message.instructions)
+
             if message.match['in_port']:
                 in_port = message.match['in_port']
             else :
@@ -693,11 +696,22 @@ class OfTester(app_manager.RyuApp):
             if KEY_EGRESS in pkt or KEY_THROUGHPUT in pkt:
                 flowmods = self.faucet.valve.rcv_packet(dp.id, in_port, vlan_vid, None, new_pkt)
                 self.faucet.send_flow_msgs(dp,flowmods)
+
+                if not out_port:
+                    out_port = self.tester_recc_port_1
+                    
                 new_rvpkt = self.reverseTestPacket(new_pkt)
-                if out_port:
-                    flowmods = self.faucet.valve.rcv_packet(dp.id, out_port, vlan_vid, None, new_rvpkt)    
-                else:
-                    flowmods = self.faucet.valve.rcv_packet(dp.id, self.tester_recv_port_1, vlan_vid, None, new_rvpkt)
+                for vid,vlanObj in self.faucet.valve.dp.vlans.iteritems():
+                    for port in vlanObj.get_ports():
+                        if port.number == out_port: vlan_out_vid = vid
+                flowmods = self.faucet.valve.rcv_packet(dp.id, out_port, vlan_out_vid, None, new_rvpkt)    
+
+                #if out_port:
+                #    flowmods = self.faucet.valve.rcv_packet(dp.id, out_port, vlan_vid, None, new_rvpkt)    
+                #else:
+                #    new_rvpkt = self.reverseTestPacket(new_pkt)
+                #    flowmods = self.faucet.valve.rcv_packet(dp.id, self.tester_recv_port_1, vlan_vid, None, new_rvpkt)
+
                 #if KEY_THROUGHPUT in pkt:
                 #    flowmods = self.addMeterInst(flowmods, meterInst, self.tester_recv_port_1)
                 self.faucet.send_flow_msgs(dp,flowmods)
@@ -931,7 +945,7 @@ class OfTester(app_manager.RyuApp):
         xid = self.tester_sw.send_packet_out(pkt[KEY_INGRESS])
         self.send_msg_xids.append(xid)
 
-    def _continuous_packet_send(self, pkt):
+    def _continuous_packet_send(self, pkt, test):
         assert self.ingress_event is None
 
         self.packets_sent = 0
@@ -958,7 +972,15 @@ class OfTester(app_manager.RyuApp):
             self.ingress_event = hub.Event()
             tid = hub.spawn(self._send_packet_thread, arg)
             self.ingress_threads.append(tid)
-            self.ingress_event.wait(duration_time)
+
+            if 'reload' in pkt[KEY_PACKETS] and pkt[KEY_PACKETS]['reload']:
+                self.ingress_event.wait(duration_time/2)            
+                self.faucet.reload_config(None)
+                self._test(STATE_FLOW_INSTALL, self.target_sw, test.prerequisite[0], test.tests[0])
+                self.ingress_event.wait(duration_time/2)
+            else:
+                self.ingress_event.wait(duration_time)
+
             for tid2 in self.ingress_threads:
                 hub.kill(tid2)
             hub.joinall(self.ingress_threads)
@@ -992,7 +1014,7 @@ class OfTester(app_manager.RyuApp):
         tid = hub.spawn(self._send_packet_thread, arg)
         self.ingress_threads.append(tid)
         hub.sleep(0)
-        #self.packets_sent += count
+        self.packets_sent += count
         for _ in range(count):
             if arg['randomize']:
                 msg = eval('/'.join(arg['packet_text']))
@@ -1131,7 +1153,7 @@ class OfTester(app_manager.RyuApp):
                 raise TestError(self.state, match=match)
             increased_bytes = end[1][match][0] - start[1][match][0]
             increased_packets = end[1][match][1] - start[1][match][1]
-            print('duration = %s,sent = %s, rcv packets = %s, bytes = %s, mbps = %.2f mbps' %(elapsed_sec,self.packets_sent,increased_packets, increased_bytes, increased_bytes *8 / 1024 / 1024 / elapsed_sec))
+            print('duration = %s,sent = %s, rcv packets = %s, lost = %s , bytes = %s, %.2f mbps' %(elapsed_sec,self.packets_sent,increased_packets, self.packets_sent - increased_packets,increased_bytes, increased_bytes *8 / 1024 / 1024 / elapsed_sec))
             if throughput[KEY_PKTPS]:
                 key = KEY_PKTPS
                 conv = 1
@@ -1263,17 +1285,6 @@ class OfTester(app_manager.RyuApp):
                 self.waiter.set()
                 hub.sleep(0)
                 msg = ev.msg
-
-    def reverseTestPacket(self, pkt):
-        import ryu.lib.packet
-        eth_pkt = pkt.get_protocols(packet.ethernet.ethernet)[0]
-        src = eth_pkt.src
-        eth_pkt.src = eth_pkt.dst
-        eth_pkt.dst = src
-    
-        pkt = packet.Packet()
-        pkt.add_protocol(eth_pkt)
-        return pkt
 
     @set_ev_cls(ofp_event.EventOFPErrorMsg, [handler.HANDSHAKE_DISPATCHER,
                                              handler.CONFIG_DISPATCHER,
@@ -1550,6 +1561,7 @@ class Test(stringify.StringifyMixin):
                     ' or "%s" field.' % (KEY_TESTS, KEY_INGRESS, KEY_EGRESS,
                                          KEY_PKT_IN, KEY_TBL_MISS))
             test_pkt = {}
+
             # parse 'ingress'
             if KEY_INGRESS not in test:
                 raise ValueError('a test requires "%s" field.' % KEY_INGRESS)
@@ -1566,7 +1578,8 @@ class Test(stringify.StringifyMixin):
                         KEY_PKTPS, DEFAULT_PKTPS),
                     'randomize': True in [
                         line.find('randint') != -1
-                        for line in test[KEY_INGRESS][KEY_PACKETS][KEY_DATA]]}
+                        for line in test[KEY_INGRESS][KEY_PACKETS][KEY_DATA]],
+                    'reload':test[KEY_INGRESS]['reload']}
             else:
                 raise ValueError('invalid format: "%s" field' % KEY_INGRESS)
             # parse 'egress' or 'PACKET_IN' or 'table-miss'
