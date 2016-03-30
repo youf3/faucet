@@ -1,5 +1,15 @@
 #!/usr/bin/python
 
+# mininet tests for FAUCET
+#
+# * must be run as root
+# * you can run a specific test case only, by adding the class name of the test
+#   case to the command. Eg ./faucet_mininet_test.py FaucetUntaggedIPv4RouteTest
+#
+# TODO:
+#
+# * bridge hardware OF switch for comparison with OVS
+
 import os
 import re
 import shutil
@@ -14,6 +24,13 @@ from mininet.topo import Topo
 from mininet.util import dumpNodeConnections, pmonitor
 
 FAUCET_DIR = '../src/ryu_faucet/org/onfsdn/faucet'
+
+CONFIG_HEADER = '''
+---
+dp_id: 0x1
+name: "faucet-1"
+hardware: "Open vSwitch"
+'''
 
 
 class VLANHost(Host):
@@ -58,7 +75,7 @@ class FaucetSwitchTopo(Topo):
 
 class FaucetTest(unittest.TestCase):
 
-    CONFIG = ""
+    CONFIG = ''
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -76,11 +93,7 @@ class FaucetTest(unittest.TestCase):
 
 class FaucetUntaggedTest(FaucetTest):
 
-    CONFIG = """
----
-dp_id: 0x1
-name: "untagged-faucet-1"
-hardware: "Allied-Telesis"
+    CONFIG = CONFIG_HEADER + """
 interfaces:
     1:
         native_vlan: 100
@@ -115,13 +128,64 @@ vlans:
         super(FaucetUntaggedTest, self).tearDown()
 
 
-class FaucetUntaggedNoVLanUnicaseFloodTest(FaucetUntaggedTest):
+class FaucetUntaggedIPv4RouteTest(FaucetUntaggedTest):
 
-    CONFIG = """
----
-dp_id: 0x1
-name: "untagged-faucet-1"
-hardware: "Allied-Telesis"
+    CONFIG = CONFIG_HEADER + """
+interfaces:
+    1:
+        native_vlan: 100
+        description: "b1"
+    2:
+        native_vlan: 100
+        description: "b2"
+    3:
+        native_vlan: 100
+        description: "b3"
+    4:
+        native_vlan: 100
+        description: "b4"
+vlans:
+    100:
+        description: "untagged"
+        ip: "10.0.0.254/24"
+        routes:
+            - route:
+                ip_dst: "10.0.1.0/24"
+                ip_gw: "10.0.0.1"
+            - route:
+                ip_dst: "10.0.2.0/24"
+                ip_gw: "10.0.0.2"
+"""
+
+    def test_untagged(self):
+        host_pair = self.net.hosts[:2]
+        first_host, second_host = host_pair
+        first_host_routed_ip = '10.0.1.1'
+        second_host_routed_ip = '10.0.2.1'
+        first_host.setIP('10.0.0.1/24')
+        first_host.cmd(('ifconfig %s:0 %s netmask 255.255.255.0 up' %
+            (first_host.intf(), first_host_routed_ip)))
+        second_host.setIP('10.0.0.2/24')
+        second_host.cmd(('ifconfig %s:0 %s netmask 255.255.255.0 up' %
+            (second_host.intf(), second_host_routed_ip)))
+        self.assertEquals(0, self.net.pingPair())
+        first_host.cmd('route add -net 10.0.2.0/24 gw 10.0.0.254')
+        second_host.cmd('route add -net 10.0.1.0/24 gw 10.0.0.254')
+        first_to_second_result = first_host.cmd(
+            'ping -c1 %s' % second_host_routed_ip)
+        self.assertTrue(re.search(
+            '1 packets transmitted, 1 received, 0\% packet loss',
+            first_to_second_result))
+        second_to_first_result = second_host.cmd(
+            'ping -c1 %s' % first_host_routed_ip)
+        self.assertTrue(re.search(
+            '1 packets transmitted, 1 received, 0\% packet loss',
+            second_to_first_result))
+
+
+class FaucetUntaggedNoVLanUnicastFloodTest(FaucetUntaggedTest):
+
+    CONFIG = CONFIG_HEADER + """
 interfaces:
     1:
         native_vlan: 100
@@ -166,11 +230,7 @@ class FaucetUntaggedHostMoveTest(FaucetUntaggedTest):
 
 class FaucetUntaggedHostPermanentLearnTest(FaucetUntaggedTest):
 
-    CONFIG = """
----
-dp_id: 0x1
-name: "untagged-faucet-1"
-hardware: "Allied-Telesis"
+    CONFIG = CONFIG_HEADER + """
 interfaces:
     1:
         native_vlan: 100
@@ -205,11 +265,7 @@ vlans:
 
 class FaucetUntaggedControlPlaneTest(FaucetUntaggedTest):
 
-    CONFIG = """
----
-dp_id: 0x1
-name: "untagged-faucet-1"
-hardware: "Allied-Telesis"
+    CONFIG = CONFIG_HEADER + """
 interfaces:
     1:
         native_vlan: 100
@@ -237,11 +293,7 @@ vlans:
 
 class FaucetTaggedAndUntaggedTest(FaucetTest):
 
-    CONFIG = """
----
-dp_id: 0x1
-name: "tagged-and-untagged-faucet-1"
-hardware: "Allied-Telesis"
+    CONFIG = CONFIG_HEADER + """
 interfaces:
     1:
         tagged_vlans: [100]
@@ -288,11 +340,7 @@ vlans:
 
 class FaucetUntaggedACLTest(FaucetUntaggedTest):
 
-    CONFIG = """
----
-dp_id: 0x1
-name: "untagged-faucet-1"
-hardware: "Allied-Telesis"
+    CONFIG = CONFIG_HEADER + """
 interfaces:
     1:
         native_vlan: 100
@@ -342,13 +390,10 @@ acls:
             first_host.cmd('nc -w 3 %s 5002' % second_host.IP()))
         second_host.sendInt()
 
+
 class FaucetUntaggedMirrorTest(FaucetUntaggedTest):
 
-    CONFIG = """
----
-dp_id: 0x1
-name: "untagged-faucet-1"
-hardware: "Allied-Telesis"
+    CONFIG = CONFIG_HEADER + """
 interfaces:
     1:
         native_vlan: 100
@@ -393,11 +438,7 @@ vlans:
 
 class FaucetTaggedTest(FaucetTest):
 
-    CONFIG = """
----
-dp_id: 0x1
-name: "tagged-faucet-1"
-hardware: "Allied-Telesis"
+    CONFIG = CONFIG_HEADER + """
 interfaces:
     1:
         tagged_vlans: [100]
@@ -431,6 +472,89 @@ vlans:
         self.net.stop()
         super(FaucetTaggedTest, self).tearDown()
         time.sleep(1)
+
+
+class FaucetTaggedControlPlaneTest(FaucetTaggedTest):
+
+    CONFIG = CONFIG_HEADER + """
+interfaces:
+    1:
+        tagged_vlans: [100]
+        description: "b1"
+    2:
+        tagged_vlans: [100]
+        description: "b2"
+    3:
+        tagged_vlans: [100]
+        description: "b3"
+    4:
+        tagged_vlans: [100]
+        description: "b4"
+vlans:
+    100:
+        description: "tagged"
+        ip: "10.0.0.254/24"
+"""
+
+    def test_ping_controller(self):
+        ping_result = self.net.hosts[0].cmd('ping -c1 10.0.0.254')
+        self.assertTrue(re.search(
+            '1 packets transmitted, 1 received, 0\% packet loss', ping_result))
+
+
+class FaucetTaggedIPv4RouteTest(FaucetTaggedTest):
+
+    CONFIG = CONFIG_HEADER + """
+interfaces:
+    1:
+        tagged_vlans: [100]
+        description: "b1"
+    2:
+        tagged_vlans: [100]
+        description: "b2"
+    3:
+        tagged_vlans: [100]
+        description: "b3"
+    4:
+        tagged_vlans: [100]
+        description: "b4"
+vlans:
+    100:
+        description: "tagged"
+        ip: "10.0.0.254/24"
+        routes:
+            - route:
+                ip_dst: "10.0.1.0/24"
+                ip_gw: "10.0.0.1"
+            - route:
+                ip_dst: "10.0.2.0/24"
+                ip_gw: "10.0.0.2"
+"""
+
+    def test_tagged(self):
+        host_pair = self.net.hosts[:2]
+        first_host, second_host = host_pair
+        first_host_routed_ip = '10.0.1.1'
+        second_host_routed_ip = '10.0.2.1'
+        first_host.setIP('10.0.0.1/24')
+        first_host.cmd(('ifconfig %s:0 %s netmask 255.255.255.0 up' %
+            (first_host.intf(), first_host_routed_ip)))
+        second_host.setIP('10.0.0.2/24')
+        second_host.cmd(('ifconfig %s:0 %s netmask 255.255.255.0 up' %
+            (second_host.intf(), second_host_routed_ip)))
+        self.assertEquals(0, self.net.pingPair())
+        first_host.cmd('route add -net 10.0.2.0/24 gw 10.0.0.254')
+        second_host.cmd('route add -net 10.0.1.0/24 gw 10.0.0.254')
+        first_to_second_result = first_host.cmd(
+            'ping -c1 %s' % second_host_routed_ip)
+        self.assertTrue(re.search(
+            '1 packets transmitted, 1 received, 0\% packet loss',
+            first_to_second_result))
+        second_to_first_result = second_host.cmd(
+            'ping -c1 %s' % first_host_routed_ip)
+        self.assertTrue(re.search(
+            '1 packets transmitted, 1 received, 0\% packet loss',
+            second_to_first_result))
 
 
 if __name__ == '__main__':

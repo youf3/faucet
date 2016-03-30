@@ -14,14 +14,14 @@
 # limitations under the License.
 
 import copy
-import yaml
 import logging
+import yaml
 
 from vlan import VLAN
 from port import Port
 
 
-class DP:
+class DP(object):
     """Object to hold the configuration for a faucet controlled datapath."""
 
     # Known to run FAUCET
@@ -36,6 +36,7 @@ class DP:
     vlans = None
     ports = None
     running = False
+    influxdb_stats = False
 
     def __init__(self, dp_id, logname):
         self.dp_id = dp_id
@@ -75,12 +76,12 @@ class DP:
         dp.__dict__.update(conf)
         dp.set_defaults()
 
-        for k, v in vlans.iteritems():
-            dp.add_vlan(k, v)
-        for k, v in interfaces.iteritems():
-            dp.add_port(k, v)
-        for k, v in acls.iteritems():
-            dp.add_acl(k, v)
+        for vid, vlan_conf in vlans.iteritems():
+            dp.add_vlan(vid, vlan_conf)
+        for port_num, port_conf in interfaces.iteritems():
+            dp.add_port(port_num, port_conf)
+        for acl_num, acl_conf in acls.iteritems():
+            dp.add_acl(acl_num, acl_conf)
 
 
         return dp
@@ -102,6 +103,7 @@ class DP:
         assert isinstance(self.monitor_flow_table, bool)
         assert isinstance(self.monitor_flow_table_file, basestring)
         assert isinstance(self.monitor_flow_table_interval, int)
+        assert isinstance(self.influxdb_stats, bool)
 
     def set_defaults(self):
         # Offset for tables used by faucet
@@ -146,9 +148,11 @@ class DP:
         self.__dict__.setdefault('description', self.name)
         # The hardware maker (for chosing an openflow driver)
         self.__dict__.setdefault('hardware', 'Open_vSwitch')
+        # Whether to use influxdb for stats
+        self.__dict__.setdefault('influxdb_stats', False)
 
-    def add_acl(self, acl_num, acl_conf=[]):
-        if acl_conf:
+    def add_acl(self, acl_num, acl_conf=None):
+        if acl_conf is not None:
             self.acls[acl_num] = [x['rule'] for x in acl_conf]
 
     def add_port(self, port_num, port_conf=None):
