@@ -305,8 +305,7 @@ class OfTester(app_manager.RyuApp):
         os.environ['FAUCET_EXCEPTION_LOG'] = os.path.join(self.tmpdir,
             'faucet-exception.log')
 
-        fc = Faucet(*args, **kwargs)
-        self.faucet = fc
+        self.faucet = Faucet(*args, **kwargs)
 
         def __get_version(opt):
             vers = {
@@ -478,6 +477,7 @@ class OfTester(app_manager.RyuApp):
 
             # Install flows.
             if 'throughput' in test.tests[0]:
+                #TODO : Install meter when specified in the json file
                 self._test(STATE_METER_INSTALL, self.target_sw, test.prerequisite, test.tests[0])
             else:
                     #TODO: Checking whether the flow is installed correctly
@@ -711,8 +711,7 @@ class OfTester(app_manager.RyuApp):
                 actions =  [self.tester_sw.dp.ofproto_parser.OFPActionOutput(self.tester_sw.dp.ofproto.OFPP_CONTROLLER, max_len=256)]
                 match = self.faucet.valve.valve_in_match(vlan = v)
                 inst = [self.faucet.valve.apply_actions(actions)]
-                flowmods = [self.faucet.valve.valve_flowmod(self.faucet.
-                                                            valve.dp.eth_src_table,match = match,priority=self.valve.dp.highest_priority,inst=inst)]
+                flowmods = [self.faucet.valve.valve_flowmod(self.faucet.valve.dp.eth_src_table,match = match,priority=self.valve.dp.highest_priority,inst=inst)]
                 self.faucet.send_flow_msgs(dp,flowmods)
                 
         else:
@@ -1259,15 +1258,6 @@ class OfTester(app_manager.RyuApp):
         msg = ev.msg
         dp = msg.datapath
         ofp = dp.ofproto
-
-        if msg.reason == ofp.OFPR_NO_MATCH:
-            reason = 'NO MATCH'
-        elif msg.reason == ofp.OFPR_ACTION:
-            reason = 'ACTION'
-        elif msg.reason == ofp.OFPR_INVALID_TTL:
-            reason = 'INVALID TTL'
-        else:
-            reason = 'unknown'
 
         state_list = [STATE_FLOW_MATCH_CHK]
         if self.state in state_list:
