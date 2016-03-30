@@ -705,15 +705,6 @@ class OfTester(app_manager.RyuApp):
                     for port in vlanObj.get_ports():
                         if port.number == out_port: vlan_out_vid = vid
                 flowmods = self.faucet.valve.rcv_packet(dp.id, out_port, vlan_out_vid, None, new_rvpkt)    
-
-                #if out_port:
-                #    flowmods = self.faucet.valve.rcv_packet(dp.id, out_port, vlan_vid, None, new_rvpkt)    
-                #else:
-                #    new_rvpkt = self.reverseTestPacket(new_pkt)
-                #    flowmods = self.faucet.valve.rcv_packet(dp.id, self.tester_recv_port_1, vlan_vid, None, new_rvpkt)
-
-                #if KEY_THROUGHPUT in pkt:
-                #    flowmods = self.addMeterInst(flowmods, meterInst, self.tester_recv_port_1)
                 self.faucet.send_flow_msgs(dp,flowmods)
 
             elif KEY_PKT_IN in pkt:
@@ -1579,7 +1570,10 @@ class Test(stringify.StringifyMixin):
                     'randomize': True in [
                         line.find('randint') != -1
                         for line in test[KEY_INGRESS][KEY_PACKETS][KEY_DATA]],
-                    'reload':test[KEY_INGRESS]['reload']}
+                    'reload':True in [
+                        line.find('reload') != -1
+                        for line in test[KEY_INGRESS][KEY_PACKETS][KEY_DATA]]
+                    }
             else:
                 raise ValueError('invalid format: "%s" field' % KEY_INGRESS)
             # parse 'egress' or 'PACKET_IN' or 'table-miss'
