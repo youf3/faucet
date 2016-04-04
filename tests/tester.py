@@ -273,6 +273,7 @@ class TestError(TestMessageBase):
     def __init__(self, state, **argv):
         super(TestError, self).__init__(state, ERROR, **argv)
 
+
 class OfTester(app_manager.RyuApp):
     """ OpenFlow Switch Tester. """
     tester_ver = None
@@ -361,7 +362,7 @@ class OfTester(app_manager.RyuApp):
         try:
             return int(dpid_str, 16)
         except ValueError as err:
-            self.logger.error('Invarid dpid parameter. %s', err)
+            self.logger.error('Invalid dpid parameter. %s', err)
             self._test_end()
 
     def close(self):
@@ -936,6 +937,12 @@ class OfTester(app_manager.RyuApp):
         self.send_msg_xids.append(xid)
 
     def _continuous_packet_send(self, pkt, test):
+
+        def __test_pkt_from_json(test):
+            data = eval('/'.join(test))
+            data.serialize()
+            return six.binary_type(data.data)
+
         assert self.ingress_event is None
 
         self.packets_sent = 0
@@ -944,6 +951,7 @@ class OfTester(app_manager.RyuApp):
         pktps = pkt[KEY_PACKETS][KEY_PKTPS]
         duration_time = pkt[KEY_PACKETS][KEY_DURATION_TIME]
         randomize = pkt[KEY_PACKETS]['randomize']
+        generate_mac = pkt[KEY_PACKETS]['generate_mac']
 
         self.logger.debug("send_packet:[%s]", packet.Packet(pkt_bin))
         self.logger.debug("pktps:[%d]", pktps)
@@ -960,6 +968,27 @@ class OfTester(app_manager.RyuApp):
 
         try:
             self.ingress_event = hub.Event()
+
+            if generate_mac is not False:
+                for x in range(0,generate_mac):
+                    new_MAC = self.randomMAC()
+                    dest_mac = pkt_text[0].split('src=\'')[1].split('\'')[0]
+                    new_pkt_text = pkt_text[:] 
+                    new_pkt_text[0] = new_pkt_text[0].replace(dest_mac, new_MAC)
+                    new_pkt_bin = __test_pkt_from_json(new_pkt_text)
+                    new_pktps = 1
+                    new_arg = {'packet_text': new_pkt_text,
+                               'packet_binary': new_pkt_bin,
+                               'thread_counter': 0,
+                               'dot_span': int(CONTINUOUS_PROGRESS_SPAN /
+                                               CONTINUOUS_THREAD_INTVL),
+                               'packet_counter': float(0),
+                               'packet_counter_inc': new_pktps * CONTINUOUS_THREAD_INTVL,
+                               'randomize': randomize}
+
+                    tid = hub.spawn(self._send_packet_thread, new_arg)
+                    self.ingress_threads.append(tid)
+            hub.sleep(1)
             tid = hub.spawn(self._send_packet_thread, arg)
             self.ingress_threads.append(tid)
 
@@ -980,6 +1009,16 @@ class OfTester(app_manager.RyuApp):
         finally:
             sys.stdout.write("\r\n")
             sys.stdout.flush()
+
+    def randomMAC(self):
+        import random
+        mac = [ 0x00, 0x16, 0x3e,
+                random.randint(0x00, 0x7f),
+                random.randint(0x00, 0xff),
+                random.randint(0x00, 0xff) ]
+        return ':'.join(map(lambda x: "%02x" % x, mac))
+
+
 
     def _send_packet_thread(self, arg):
         """ Send several packets continuously. """
@@ -1013,7 +1052,6 @@ class OfTester(app_manager.RyuApp):
             else:
                 data = arg['packet_binary']
             try:
-                pass
                 self.tester_sw.send_packet_out(data)
             except Exception as err:
                 self.thread_msg = err
@@ -1276,7 +1314,6 @@ class OfTester(app_manager.RyuApp):
             if self.waiter:
                 self.waiter.set()
                 hub.sleep(0)
-
 
 class OpenFlowSw(object):
 
@@ -1562,8 +1599,15 @@ class Test(stringify.StringifyMixin):
                         for line in test[KEY_INGRESS][KEY_PACKETS][KEY_DATA]],
                     'reload':True in [
                         line.find('reload') != -1
-                        for line in test[KEY_INGRESS][KEY_PACKETS][KEY_DATA]]
+                        for line in test[KEY_INGRESS][KEY_PACKETS]]
                     }
+                gen_mac = False
+                for line in test[KEY_INGRESS][KEY_PACKETS]:
+                    if line.find('generate_mac') != -1:
+                        gen_mac = test[KEY_INGRESS][KEY_PACKETS]['generate_mac']
+
+                test_pkt[KEY_PACKETS]['generate_mac'] = gen_mac
+                
             else:
                 raise ValueError('invalid format: "%s" field' % KEY_INGRESS)
             # parse 'egress' or 'PACKET_IN' or 'table-miss'
@@ -1605,7 +1649,6 @@ class Test(stringify.StringifyMixin):
             tests.append(test_pkt)
 
         return description, prerequisite, tests
-
 
 class DummyDatapath(ofproto_protocol.ProtocolDesc):
     def __init__(self, version=None):
