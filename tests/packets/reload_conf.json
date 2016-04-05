@@ -1,0 +1,72 @@
+[
+    "Throughput test",
+    {
+        "description":"Throughput test",
+        "prerequisite":[
+            {
+                "OFPFlowMod":{
+                    "match":{
+                        "OFPMatch":{
+                            "oxm_fields":[
+                                {
+                                    "OXMTlv":{
+                                        "field":"in_port",
+                                        "value":1
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "instructions":[
+                        {
+                            "OFPInstructionActions":{
+                                "actions":[
+                                    {
+                                        "OFPActionOutput":{
+                                            "port":2
+                                        }
+                                    }
+                                ],
+                                "type":4
+                            }
+                        }
+                    ]
+                }
+            }
+        ],
+        "tests":[
+            {
+                "ingress":{
+                    "packets":{
+                        "data":[
+                            "ethernet(dst='22:22:22:22:22:22', src='12:11:11:11:11:11', ethertype=2048)",
+                            "ipv4(proto=6)",
+                            "tcp()",
+                            "bytes(b'\\x11' * (1500 - 54))"
+                        ],
+                        "pktps":5000,
+                        "duration_time":10
+                    },
+		    "reload":true
+                },
+                "egress":{
+                    "throughput":[
+                        {
+                            "OFPMatch":{
+                                "oxm_fields":[
+                                    {
+                                        "OXMTlv":{
+                                            "field":"in_port",
+                                            "value":2
+                                        }
+                                    }
+                                ]
+                            },
+                            "kbps":1000000
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+]

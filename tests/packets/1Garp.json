@@ -1,0 +1,71 @@
+[
+    "Testing 1Gbps ARP",
+    {
+        "description":"1g ARP",
+        "prerequisite":[
+            {
+                "OFPFlowMod":{
+                    "match":{
+                        "OFPMatch":{
+                            "oxm_fields":[
+                                {
+                                    "OXMTlv":{
+                                        "field":"in_port",
+                                        "value":1
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "instructions":[
+                        {
+                            "OFPInstructionActions":{
+                                "actions":[
+                                    {
+                                        "OFPActionOutput":{
+                                            "port":2
+                                        }
+                                    }
+                                ],
+                                "type":4
+                            }
+                        }
+                    ]
+                }
+            }
+        ],
+        "tests":[
+            {
+                "ingress":{
+                    "packets":{
+                        "data":[
+                            "ethernet(dst='22:22:22:22:22:22', src='12:11:11:11:11:11', ethertype=2054)",
+                            "arp(dst_mac='22:22:22:22:22:22', src_mac='12:11:11:11:11:11')",
+                            "bytes(b'\\x11' * (1500 - 42))"
+
+                        ],
+                        "pktps":875000,
+                        "duration_time":30
+                    }
+                },
+                "egress":{
+                    "throughput":[
+                        {
+                            "OFPMatch":{
+                                "oxm_fields":[
+                                    {
+                                        "OXMTlv":{
+                                            "field":"in_port",
+                                            "value":2
+                                        }
+                                    }
+                                ]
+                            },
+                            "kbps":1000000
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+]

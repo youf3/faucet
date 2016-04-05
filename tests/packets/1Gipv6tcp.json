@@ -1,0 +1,71 @@
+[
+    "Testing 1Gbps UDP over IPv6",
+    {
+        "description":"1G IPv6 udp",
+        "prerequisite":[
+            {
+                "OFPFlowMod":{
+                    "match":{
+                        "OFPMatch":{
+                            "oxm_fields":[
+                                {
+                                    "OXMTlv":{
+                                        "field":"in_port",
+                                        "value":1
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "instructions":[
+                        {
+                            "OFPInstructionActions":{
+                                "actions":[
+                                    {
+                                        "OFPActionOutput":{
+                                            "port":2
+                                        }
+                                    }
+                                ],
+                                "type":4
+                            }
+                        }
+                    ]
+                }
+            }
+        ],
+        "tests":[
+            {
+                "ingress":{
+                    "packets":{
+                        "data":[
+                            "ethernet(dst='22:22:22:22:22:22', src='12:11:11:11:11:11', ethertype=34525)",
+                            "ipv6(nxt=6)",
+                            "tcp()",
+                            "bytes(b'\\x11' * (1500 - 74))"
+                        ],
+                        "pktps":875000,
+                        "duration_time":30
+                    }
+                },
+                "egress":{
+                    "throughput":[
+                        {
+                            "OFPMatch":{
+                                "oxm_fields":[
+                                    {
+                                        "OXMTlv":{
+                                            "field":"in_port",
+                                            "value":2
+                                        }
+                                    }
+                                ]
+                            },
+                            "kbps":1000000
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+]
