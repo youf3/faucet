@@ -952,6 +952,7 @@ class OfTester(app_manager.RyuApp):
         duration_time = pkt[KEY_PACKETS][KEY_DURATION_TIME]
         randomize = pkt[KEY_PACKETS]['randomize']
         generate_mac = pkt[KEY_PACKETS]['generate_mac']
+        flooding = pkt[KEY_PACKETS]['flooding']
 
         self.logger.debug("send_packet:[%s]", packet.Packet(pkt_bin))
         self.logger.debug("pktps:[%d]", pktps)
@@ -972,9 +973,9 @@ class OfTester(app_manager.RyuApp):
             if generate_mac is not False:
                 for x in range(0,generate_mac):
                     new_MAC = self.randomMAC()
-                    dest_mac = pkt_text[0].split('src=\'')[1].split('\'')[0]
+                    src_mac = pkt_text[0].split('src=\'')[1].split('\'')[0]
                     new_pkt_text = pkt_text[:] 
-                    new_pkt_text[0] = new_pkt_text[0].replace(dest_mac, new_MAC)
+                    new_pkt_text[0] = new_pkt_text[0].replace(src_mac, new_MAC)
                     new_pkt_bin = __test_pkt_from_json(new_pkt_text)
                     new_pktps = 1
                     new_arg = {'packet_text': new_pkt_text,
@@ -989,6 +990,24 @@ class OfTester(app_manager.RyuApp):
                     tid = hub.spawn(self._send_packet_thread, new_arg)
                     self.ingress_threads.append(tid)
             hub.sleep(1)
+
+            if flooding:
+                new_MAC = 'ff:ff:ff:ff:ff:ff'
+                dst_MAC = pkt_text[0].split('dst=\'')[1].split('\'')[0]
+                new_pkt_text = pkt_text[:]
+                new_pkt_text[0] = new_pkt_text[0].replace(dst_MAC, new_MAC)
+                new_pkt_bin = __test_pkt_from_json(new_pkt_text)
+
+                arg = {'packet_text': new_pkt_text,
+                       'packet_binary': new_pkt_bin,
+                       'thread_counter': 0,
+                       'dot_span': int(CONTINUOUS_PROGRESS_SPAN /
+                                       CONTINUOUS_THREAD_INTVL),
+                       'packet_counter': float(0),
+                       'packet_counter_inc': pktps * CONTINUOUS_THREAD_INTVL,
+                       'randomize': randomize}
+
+
             tid = hub.spawn(self._send_packet_thread, arg)
             self.ingress_threads.append(tid)
 
@@ -1605,8 +1624,14 @@ class Test(stringify.StringifyMixin):
                 for line in test[KEY_INGRESS][KEY_PACKETS]:
                     if line.find('generate_mac') != -1:
                         gen_mac = test[KEY_INGRESS][KEY_PACKETS]['generate_mac']
-
                 test_pkt[KEY_PACKETS]['generate_mac'] = gen_mac
+
+                flooding = False
+                for line in test[KEY_INGRESS][KEY_PACKETS]:
+                    if line.find('flooding') != -1:
+                        flooding = test[KEY_INGRESS][KEY_PACKETS]['flooding']
+                test_pkt[KEY_PACKETS]['flooding'] = flooding
+
                 
             else:
                 raise ValueError('invalid format: "%s" field' % KEY_INGRESS)
