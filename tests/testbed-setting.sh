@@ -1,5 +1,7 @@
 #!/bin/bash
 
+#This script sets up ovs with four interfaces for ryu-testing framework
+
 bridge="br0"
 int1="eth2"
 int2="eth4"
