@@ -36,7 +36,7 @@ from ryu.exception import RyuException
 from ryu.lib import dpid as dpid_lib
 from ryu.lib import hub
 from ryu.lib import stringify
-
+from ryu.ofproto import ether
 
 from ryu.lib.packet import packet
 from ryu.ofproto import ofproto_parser
@@ -55,6 +55,8 @@ import tempfile, os
 from faucet.faucet import EventFaucetReconfigure
 from faucet.faucet import Faucet
 
+import warnings
+
 # import all packet libraries.
 PKT_LIB_PATH = 'ryu.lib.packet'
 for modname, moddef in sys.modules.items():
@@ -64,7 +66,6 @@ for modname, moddef in sys.modules.items():
         if not inspect.isclass(clsdef):
             continue
         exec('from %s import %s' % (modname, clsname))
-
 
 """ Required test network:
 
@@ -476,16 +477,15 @@ class OfTester(app_manager.RyuApp):
             self._test(STATE_INIT_FLOW, self.target_sw)
             self._test(STATE_INIT_THROUGHPUT_FLOW, self.tester_sw)
 
-            # Install flows.
-            if 'throughput' in test.tests[0]:
-                #TODO : Install meter when specified in the json file
-                self._test(STATE_METER_INSTALL, self.target_sw, test.prerequisite, test.tests[0])
-            else:
-                    #TODO: Checking whether the flow is installed correctly
-                self._test(STATE_FLOW_INSTALL, self.target_sw,test.prerequisite[0], test.tests[0])
- 
             # Do tests.
             for pkt in test.tests:
+                # Install flows.
+                if 'throughput' in test.tests[0]:
+                #TODO : Install meter when specified in the json file
+                    self._test(STATE_METER_INSTALL, self.target_sw, test.prerequisite, test.tests[0])
+                else:
+                    #TODO: Checking whether the flow is installed correctly
+                    self._test(STATE_FLOW_INSTALL, self.target_sw,test.prerequisite[0], test.tests[0])
 
                 # Get stats before sending packet(s).
                 if KEY_EGRESS in pkt or KEY_PKT_IN in pkt:
@@ -547,7 +547,10 @@ class OfTester(app_manager.RyuApp):
             self.ingress_threads = []
 
        # Output test result.
-        self.logger.info('    %-100s %s', test.description, result[0])
+        if KEY_THROUGHPUT in test.tests[0] and 'reload' in test.tests[0][KEY_PACKETS] and test.tests[0][KEY_PACKETS]['reload']:
+            self.logger.info('    %-20s Packets lost during Reloading test = %-42s %s', test.description,(str(self.packets_lost) +'/' + str(self.packets_sent)), result[0])
+        else:
+            self.logger.info('    %-100s %s', test.description, result[0])
         if 1 < len(result):
             self.logger.info('        %s', result[1])
             if result[1] == RYU_INTERNAL_ERROR\
@@ -633,6 +636,7 @@ class OfTester(app_manager.RyuApp):
         assert isinstance(msg, datapath.dp.ofproto_parser.OFPBarrierReply)
 
         #insert default rule for valve
+        warnings.filterwarnings("ignore")
         if datapath == self.target_sw:
             dp = self.target_sw.dp
             discovered_ports = [
@@ -640,9 +644,8 @@ class OfTester(app_manager.RyuApp):
             flowmods = self.faucet.valve.datapath_connect(dp.id, discovered_ports)
             self.faucet.send_flow_msgs(dp, flowmods)
 
-
+    #generate a packet with mac address swapped between source and destination
     def reverseTestPacket(self, pkt):
-        import ryu.lib.packet
         eth_pkt = pkt.get_protocols(packet.ethernet.ethernet)[0]
         src = eth_pkt.src
         eth_pkt.src = eth_pkt.dst
@@ -654,36 +657,39 @@ class OfTester(app_manager.RyuApp):
 
     #def _test_msg_install(self, datapath, message):
     def _test_msg_install(self, datapath,message, pkt):
-        from ryu.lib.packet import ethernet
-        from ryu.lib.packet import vlan
-        from ryu.ofproto import ether
 
+        # Insert OF rules for forwarding test packet by emulating packet in from in_port and out_port using valve rcv_packet()
+        # and packet binary from config file
         if datapath.dp is self.target_sw.dp:
             if KEY_THROUGHPUT in pkt:
                 new_pkt = packet.Packet(pkt[KEY_PACKETS]['packet_binary'])
             else:
                 new_pkt = packet.Packet(pkt[KEY_INGRESS])
             dp = self.target_sw.dp
-            eth_pkt = new_pkt.get_protocols(ethernet.ethernet)[0]
+            eth_pkt = new_pkt.get_protocols(ethernet)[0]
             eth_type = eth_pkt.ethertype
 
+            # If in_port is specified, then assume packet is coming in from the port specified.
             if message.match['in_port']:
                 in_port = message.match['in_port']
             else :
                 in_port = self.target_send_port_1
 
+            #If out_port is speicfied, then monitor the specified port
             for inst in message.instructions:
                 for action in inst.actions:
                     if isinstance(action, self.target_sw.dp.ofproto_parser.OFPActionOutput):
                         out_port = action.port
 
+            #Install meter mod for the port, disabled for AT x510
             #if isinstance(message.instructions[0],self.target_sw.dp.ofproto_parser.OFPInstructionMeter):
                 #meterInst = message.instructions[0]
 
             if eth_type == ether.ETH_TYPE_8021Q:
                 # tagged packet
-                vlan_proto = new_pkt.get_protocols(vlan.vlan)[0]
+                vlan_proto = new_pkt.get_protocols(vlan)[0]
                 vlan_vid = vlan_proto.vid
+            #Append vlan for synthetic packet we use to emulate incoming packet
             else:
                 self.logger.debug('adding vlan to test packet')
                 eth_type = ether.ETH_TYPE_8021Q
@@ -691,15 +697,16 @@ class OfTester(app_manager.RyuApp):
                     for port in vlanObj.get_ports():
                         if port.number == in_port: vlan_vid = vid
                 if not vlan_vid: raise RyuException('VLAN port not found.')
-                v = vlan.vlan(vid=vlan_vid,ethertype=eth_type)
+                v = vlan(vid=vlan_vid,ethertype=eth_type)
                 new_pkt.add_protocol(v)
 
+            #Build OF flowmods for packet generation
             if KEY_EGRESS in pkt or KEY_THROUGHPUT in pkt:
                 flowmods = self.faucet.valve.rcv_packet(dp.id, in_port, vlan_vid, None, new_pkt)
                 self.faucet.send_flow_msgs(dp,flowmods)
 
                 if not out_port:
-                    out_port = self.tester_recc_port_1
+                    out_port = self.tester_recv_port_1
                     
                 new_rvpkt = self.reverseTestPacket(new_pkt)
                 for vid,vlanObj in self.faucet.valve.dp.vlans.iteritems():
@@ -958,6 +965,7 @@ class OfTester(app_manager.RyuApp):
         self.logger.debug("pktps:[%d]", pktps)
         self.logger.debug("duration_time:[%d]", duration_time)
 
+        # Build synthetic packets from configuration file
         arg = {'packet_text': pkt_text,
                'packet_binary': pkt_bin,
                'thread_counter': 0,
@@ -969,7 +977,8 @@ class OfTester(app_manager.RyuApp):
 
         try:
             self.ingress_event = hub.Event()
-
+            # Generate synthetic packets with random src mac address to populate OF flow entries
+            # to measure number of flow cache supported
             if generate_mac is not False:
                 for x in range(0,generate_mac):
                     new_MAC = self.randomMAC()
@@ -991,7 +1000,9 @@ class OfTester(app_manager.RyuApp):
                     self.ingress_threads.append(tid)
             hub.sleep(1)
 
+            # Replace MAC destination address to broadcast to check ethernet flooding performance
             if flooding:
+                #self.logger.info('Changing packets to ethernet flooding')
                 new_MAC = 'ff:ff:ff:ff:ff:ff'
                 dst_MAC = pkt_text[0].split('dst=\'')[1].split('\'')[0]
                 new_pkt_text = pkt_text[:]
@@ -1011,6 +1022,7 @@ class OfTester(app_manager.RyuApp):
             tid = hub.spawn(self._send_packet_thread, arg)
             self.ingress_threads.append(tid)
 
+            # Reload faucet config in the middle of the packet generation to measure its effect
             if 'reload' in pkt[KEY_PACKETS] and pkt[KEY_PACKETS]['reload']:
                 self.ingress_event.wait(duration_time/2)            
                 self.faucet.reload_config(None)
@@ -1029,15 +1041,13 @@ class OfTester(app_manager.RyuApp):
             sys.stdout.write("\r\n")
             sys.stdout.flush()
 
+    #Generate random MAC address
     def randomMAC(self):
-        import random
         mac = [ 0x00, 0x16, 0x3e,
-                random.randint(0x00, 0x7f),
-                random.randint(0x00, 0xff),
-                random.randint(0x00, 0xff) ]
+                randint(0x00, 0x7f),
+                randint(0x00, 0xff),
+                randint(0x00, 0xff) ]
         return ':'.join(map(lambda x: "%02x" % x, mac))
-
-
 
     def _send_packet_thread(self, arg):
         """ Send several packets continuously. """
@@ -1200,7 +1210,12 @@ class OfTester(app_manager.RyuApp):
                 raise TestError(self.state, match=match)
             increased_bytes = end[1][match][0] - start[1][match][0]
             increased_packets = end[1][match][1] - start[1][match][1]
-            print('duration = %s,sent = %s, rcv packets = %s, lost = %s , bytes = %s, %.2f mbps' %(elapsed_sec,self.packets_sent,increased_packets, self.packets_sent - increased_packets,increased_bytes, increased_bytes *8 / 1024 / 1024 / elapsed_sec))
+            self.packets_lost = self.packets_sent - increased_packets
+            self.logger.debug('duration = %s, sent = %s, rcv packets = %s, lost = '
+            '%s , bytes = %s, %.2f mbps'
+            %(elapsed_sec,self.packets_sent,increased_packets,
+            self.packets_lost,increased_bytes,
+            increased_bytes *8 / 1024 / 1024 / elapsed_sec))
             if throughput[KEY_PKTPS]:
                 key = KEY_PKTPS
                 conv = 1
