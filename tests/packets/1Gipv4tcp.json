@@ -1,7 +1,7 @@
 [
-    "Testing 1Gb/s TCP over IPv4",
+    "Testing 50 mbps TCP over IPv4",
     {
-        "description":"1G IPv4 TCP",
+        "description":"50 mbps IPv4 TCP",
         "prerequisite":[
             {
                 "OFPFlowMod":{
@@ -45,7 +45,7 @@
                             "bytes(b'\\x11' * (1500 - 54))"
 
                         ],
-                        "pktps":875000,
+                        "pktps":5000,
                         "duration_time":30
                     }
                 },
@@ -62,7 +62,7 @@
                                     }
                                 ]
                             },
-                            "kbps":1000000
+                            "kbps":53000
                         }
                     ]
                 }

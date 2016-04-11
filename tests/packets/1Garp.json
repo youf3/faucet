@@ -1,7 +1,7 @@
 [
-    "Testing 1Gbps ARP",
+    "Testing 50 mbps ARP",
     {
-        "description":"1g ARP",
+        "description":"50 mbps ARP",
         "prerequisite":[
             {
                 "OFPFlowMod":{
@@ -44,7 +44,7 @@
                             "bytes(b'\\x11' * (1500 - 42))"
 
                         ],
-                        "pktps":875000,
+                        "pktps":5000,
                         "duration_time":30
                     }
                 },
@@ -61,7 +61,7 @@
                                     }
                                 ]
                             },
-                            "kbps":1000000
+                            "kbps":53000
                         }
                     ]
                 }

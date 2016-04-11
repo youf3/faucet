@@ -1,7 +1,7 @@
 [
-    "Throughput test",
+    "Config reloading test",
     {
-        "description":"Throughput test",
+        "description":"Reloading test",
         "prerequisite":[
             {
                 "OFPFlowMod":{
@@ -45,9 +45,10 @@
                             "bytes(b'\\x11' * (1500 - 54))"
                         ],
                         "pktps":5000,
-                        "duration_time":10
-                    },
-		    "reload":true
+                        "duration_time":10,
+			"reload":true
+                    }
+
                 },
                 "egress":{
                     "throughput":[
@@ -62,7 +63,7 @@
                                     }
                                 ]
                             },
-                            "kbps":1000000
+                            "kbps":53000
                         }
                     ]
                 }

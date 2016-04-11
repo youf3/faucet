@@ -1,7 +1,7 @@
 [
-    "Testing 1Gbps UDP over IPv6",
+    "Testing 50 mbps UDP over IPv6",
     {
-        "description":"1G IPv6 udp",
+        "description":"50 mbps IPv6 udp",
         "prerequisite":[
             {
                 "OFPFlowMod":{
@@ -44,7 +44,7 @@
                             "udp()",
                             "bytes(b'\\x11' * (1500 - 74))"
                         ],
-                        "pktps":875000,
+                        "pktps":5000,
                         "duration_time":30
                     }
                 },
@@ -61,7 +61,7 @@
                                     }
                                 ]
                             },
-                            "kbps":1000000
+                            "kbps":53000
                         }
                     ]
                 }

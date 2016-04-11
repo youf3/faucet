@@ -1,7 +1,7 @@
 [
-    "Throughput test",
+    "MAC flooding with TCP test",
     {
-        "description":"Throughput test",
+        "description":"MAC flooding with TCP test",
         "prerequisite":[
             {
                 "OFPFlowMod":{
@@ -44,7 +44,7 @@
                             "tcp()",
                             "bytes(b'\\x11' * (1500 - 54))"
                         ],
-                        "pktps":10000,
+                        "pktps":5000,
                         "duration_time":10,
 			"flooding":true
                     }
@@ -62,7 +62,7 @@
                                     }
                                 ]
                             },
-                            "kbps":1000000
+                            "kbps":53000
                         }
                     ]
                 }
