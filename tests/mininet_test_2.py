@@ -1,6 +1,9 @@
 #!/usr/bin/python
 # This program measures number of flows a switch can support until it start software switching
 #using mininet
+# To test, you should have OF controller running two ports to the switch needs to be connected to
+#the interface
+
 
 from mininet.net import Mininet
 from mininet.cli import CLI
@@ -16,7 +19,7 @@ interface1 = 'eth2'
 interface2 = 'eth4'
 
 def max_flow_test(max_flows,num_iperf = 1):
-    n =  int(2*(math.sqrt(max_flows/2)))
+    n =  int(2*(math.sqrt(max_flows/2))) + 1
     net = Mininet( topo=None,build=None)
 
     s2 = net.addSwitch('s2',failMode='standalone')
@@ -30,7 +33,7 @@ def max_flow_test(max_flows,num_iperf = 1):
             net.addLink(host, s2)
             subnet1.append(host)
         else:
-            host = net.addHost('h%s' % i, ip='10.0.1.%s' % i)
+            host = net.addHost('h%s' % i, ip='10.0.0.%s' % i)
             net.addLink(host, s3)
             subnet2.append(host)
 
@@ -42,10 +45,12 @@ def max_flow_test(max_flows,num_iperf = 1):
     net.start()
     count = 0
     popens = {}
+
     for host1 in subnet1:
         for host2 in subnet2:
-            popens[host1] = host1.popen( "ping %s" % host2.IP() )
-            count += 1
+            if count < max_flows/2:
+                popens[host1] = host1.popen( "ping %s" % host2.IP() )
+                count += 1
 
     print('%s connections generated, %s flows generated ' %(count,count*2))
     time.sleep(3)
@@ -62,6 +67,7 @@ def max_flow_test(max_flows,num_iperf = 1):
         if host:
             print "<%s>: %s" % ( host.name, line.strip() )
 
+    #CLI(net)
     for host in subnet1:
         host.cmd('pkill ping')
 
@@ -73,6 +79,7 @@ def max_flow_test(max_flows,num_iperf = 1):
     net.stop()
 
 if __name__ == '__main__':
+    #only even number for max flows work, because OF flow entry is an one-way
     #max_flow_test(112)
     #max_flow_test(128)
-    max_flow_test(200,num_iperf = 1)
+    max_flow_test(199,num_iperf = 1)
